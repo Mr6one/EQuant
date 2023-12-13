@@ -182,7 +182,7 @@ We can consider rounding during quantizaztion as an optimization task and find b
 
 $$ W_{fake-q} = s \cdot \text{clip}\left(\left \lfloor \frac{W_{fp}}{s}\right \rfloor + h(V) + Z, n, p\right) $$ 
 
-where $h(v)$ is any differentiable function that takes values between $0$ and $1$. For more details see [Up or Down? Adaptive Rounding for Post-Training Quantization](https://arxiv.org/abs/2004.10568)
+where $h(v)$ is any differentiable function that takes values between $0$ and $1$. For more details see [Up or Down? Adaptive Rounding for Post-Training Quantization](https://arxiv.org/abs/2004.10568).
 
 ## Fusion
 As a rule, before quantization some layers need to be fused (such as linear layers and batch normalization) and for this purpose EQuant provides some fusion methods:
