@@ -179,6 +179,7 @@ For more details see [Data-Free Quantization Through Weight Equalization and Bia
 ### AdaRound
 
 We can consider rounding during quantizaztion as an optimization task and find better parameters by chosing the appropriate rounding direction (up or down):
+
 $$ W_q = s \cdot \text{clip}\left(\left \lfloor \frac{W_{fp}}{s}\right \rfloor + h(V) + Z, n, p\right) $$ 
 
 where $h(v)$ is any differentiable function that takes values between $0$ and $1$. For more details see [Up or Down? Adaptive Rounding for Post-Training Quantization](https://arxiv.org/abs/2004.10568)
