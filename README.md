@@ -83,13 +83,13 @@ Each quantization recipe (for both weights and activations) contains information
     * per_channel_symmetric
     * per_channel_affine
 
-* Observers &mdash; one of the followings:
+* Observer &mdash; one of the followings:
     * min_max
     * moving_average
     * quantile
     * histogram (supports only per tensor granularity)
 
-* Quantizers &mdash; one of the followings:
+* Quantizer &mdash; one of the followings:
     * torch_base &mdash; scales and offsets are frozen
     * base &mdash; enables learnable scales and offsets
     * lsq &mdash; based on [Learned Step Size Quantization](https://arxiv.org/abs/1902.08153)
