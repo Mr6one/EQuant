@@ -102,7 +102,7 @@ Each quantization recipe (for both weights and activations) contains information
 
 ## QConfigMapping
 
-QConfigMapping allows to save quantization scheme in yaml format to avoid its generation every time. Moreover, you can make sure that it was generated correctly and containes right information:
+QConfigMapping allows to save quantization scheme in yaml format to avoid its generation every time. Moreover, you can make sure that it was generated correctly and contains right information:
 
 ``` python
 
@@ -116,7 +116,7 @@ qconfig_mapping.save('qconfig.yaml')
 qconfig_mapping = QConfigMapping.from_file('qconfig.yaml')
 ```
 
-You are free to edit configuration file while it preserve correct values.
+You are free to edit configuration file while it preserves correct values.
 
 ## Algorithms
 
