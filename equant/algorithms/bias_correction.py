@@ -6,7 +6,7 @@ import torch.fx as fx
 
 from typing import Any, Iterable
 
-from equant.core.match import has_bn, quantized, wrap_into_sequential
+from equant.core.match import has_bn, quantized, decompose_module
 from equant.core.subgraph import create_subgraph, collect_inputs_outputs_for_subgraph, model_forward
 from equant.core.quantizers.fake_quantize import disable_fake_quant, enable_fake_quant, disable_observer
 from equant.core.interpreter import DataInterpreter
@@ -91,7 +91,7 @@ def bias_correction(
             module = graph_module.get_submodule(node.target)
 
             if quantized(module):
-                modules = wrap_into_sequential(module)
+                modules = decompose_module(module)
 
                 if has_bn(modules):
                     interpreter._run_node(node)
@@ -104,7 +104,7 @@ def bias_correction(
                     continue
                 
                 fp_module = fp_graph_module.get_submodule(fp_node.target)
-                fp_modules = wrap_into_sequential(fp_module)
+                fp_modules = decompose_module(fp_module)
                 
                 _, quant_outputs = collect_decomposed_module_inputs_outputs(modules, interpreter.env[node.args[0]], device, start=0, end=1)
                 _, fp_outputs = collect_decomposed_module_inputs_outputs(fp_modules, fp_interpreter.env[fp_node.args[0]], device, start=0, end=1)

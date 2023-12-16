@@ -7,7 +7,7 @@ import torch.fx as fx
 
 from typing import List, Union
 
-from equant.core.match import find_chain_forward, wrap_into_sequential
+from equant.core.match import decompose_module, find_chain_forward
 
 
 __all__ = [
@@ -153,8 +153,8 @@ def cross_layer_equalization(
         linear1 = graph_module.get_submodule(chain[0].target)
         linear2 = graph_module.get_submodule(chain[-1].target)
 
-        linear1 = wrap_into_sequential(linear1)[0]
-        linear2 = wrap_into_sequential(linear2)[0]
+        linear1 = decompose_module(linear1)[0]
+        linear2 = decompose_module(linear2)[0]
 
         cross_layer_equalization_helper(linear1, linear2)
 

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from typing import Any, Iterable, List, Tuple, Union
 
-from equant.core.match import has_bn, quantized, wrap_into_sequential
+from equant.core.match import has_bn, quantized, decompose_module
 from equant.core.subgraph import create_subgraph, collect_inputs_outputs_for_subgraph, model_forward
 from equant.core.quantizers.fake_quantize import FakeQuantizeTorchBase, disable_fake_quant, enable_fake_quant, disable_observer
 from equant.core.interpreter import DataInterpreter
@@ -288,7 +288,7 @@ def adaround(
 
             if quantized(module):
 
-                if has_bn(wrap_into_sequential(module)):
+                if has_bn(decompose_module(module)):
                     with torch.no_grad():
                         interpreter._run_node(node)
                         fp_interpreter._run_node(fp_node)

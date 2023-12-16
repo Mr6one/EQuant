@@ -12,7 +12,7 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from typing import Iterable, List, Dict, Tuple, Union
 
 from equant.quantize import quantize
-from equant.core.match import decompose_module_to_float, find_chain_forward, wrap_into_sequential, find_chain_backward, quantized
+from equant.core.match import find_chain_forward, decompose_module, find_chain_backward, quantized
 from equant.core.quantizers.fake_quantize import disable_fake_quant, enable_fake_quant, disable_observer, enable_observer, reset_observer
 from equant.core.subgraph import create_subgraph, collect_inputs_outputs_for_subgraph, model_forward
 from equant.core.interpreter import DataInterpreter
@@ -241,7 +241,7 @@ def insert_identity_linear_layer(
 ) -> None:
 
     linear2 = graph_module.get_submodule(node.target)
-    linear2 = wrap_into_sequential(linear2)[0]
+    linear2 = decompose_module(linear2)[0]
 
     linear1 = create_identity_layer_from_linear(linear2)
     module_name = insert_module(linear1, graph_module, named_modules)
@@ -280,7 +280,7 @@ def insert_identity_linear_layers(
     for node in quantized_nodes:
         if node.op == 'call_module':
             module = graph_module.get_submodule(node.target)
-            module = wrap_into_sequential(module)[0]
+            module = decompose_module(module)[0]
             if isinstance(module, LINEAR_LAYERS) and find_smooth_quant_chain(node, graph_module) is None:
                 insert_identity_linear_layer(node, graph_module, named_modules)
 
@@ -355,8 +355,8 @@ def smooth_quant(
         linear1 = graph_module.get_submodule(chain[0].target)
         linear2 = graph_module.get_submodule(chain[-1].target)
 
-        linear1 = wrap_into_sequential(linear1)[0]
-        linear2 = wrap_into_sequential(linear2)[0]
+        linear1 = decompose_module(linear1)[0]
+        linear2 = decompose_module(linear2)[0]
 
         smooth_quant_helper(linear1, linear2, activations_max_abs[node.name], alpha=alpha)
 
@@ -445,7 +445,7 @@ def insert_identity_quant_linear_layers(
             if not quantized(module):
                 continue
 
-            module = wrap_into_sequential(decompose_module_to_float(module))[0]
+            module = decompose_module(module, to_float=True)[0]
             if isinstance(module, LINEAR_LAYERS) and \
                 find_smooth_quant_chain_with_quantizers_backward(node, graph_module) is None:
                 insert_identity_quant_linear_layer(node, graph_module, named_modules)

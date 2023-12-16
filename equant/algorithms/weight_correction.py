@@ -5,7 +5,7 @@ from torch import Tensor
 import torch.nn as nn
 import torch.fx as fx
 
-from equant.core.match import wrap_into_sequential, has_bn, quantized
+from equant.core.match import decompose_module, has_bn, quantized
 
 
 __all__ = [
@@ -69,7 +69,7 @@ def weight_correction(
 
             if quantized(module):
 
-                modules = wrap_into_sequential(module)
+                modules = decompose_module(module)
 
                 if has_bn(modules):
                     continue
