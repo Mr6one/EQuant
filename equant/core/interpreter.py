@@ -19,11 +19,11 @@ from typing import Iterable
 
 
 class CacheDataLoader:
-    def __init__(self, path: str, ext: str = 'pkl') -> None:
+    def __init__(self, path: str) -> None:
 
-        paths = os.path.join(path, f'*.{ext}')
+        self.ext = 'pkl'
+        paths = os.path.join(path, f'*.{self.ext}')
         
-        self.ext = ext
         self.path = path
         self.paths = glob.glob(paths)
     
@@ -78,14 +78,15 @@ class DataLoader:
 
 
 def reinit_dataloader(
-    data: Iterable
+    data: Iterable,
+    save_path: Union[None, str] = None
 ) -> Iterable:
     
     if isinstance(data[0], dict):
         raise RuntimeError('Positional arguments are not supported.')
 
     if not isinstance(data[0], (tuple, list)):
-        dataloader = DataLoader([]) # TODO: add path arg if cache_data is enabled
+        dataloader = DataLoader(save_path or [])
         for sample in data:
             dataloader.add_sample(sample)
         return (dataloader,)
@@ -93,7 +94,7 @@ def reinit_dataloader(
     n_args = len(data[0])
     dataloader = []
     for i in range(n_args):
-        data_ldr = DataLoader([]) # TODO: add path arg if cache_data is enabled
+        data_ldr = DataLoader(save_path or [])
         for sample in data:
             data_ldr.add_sample(sample[i])
         dataloader.append(data_ldr)
@@ -209,10 +210,10 @@ class DataInterpreter(fx.Interpreter):
         args = self._process_args(n, args)
         kwargs = self._process_kwargs(n, kwargs)
 
-        results = DataLoader(save_path if save_path else [])
+        results = DataLoader(save_path or [])
         for arg, kwarg in zip(args, kwargs):
             result = target(*arg, **kwarg)
-            results.add_sample(result)
+            results.add_sample(result) # TODO: when to move to cpu?
 
         return results
 
@@ -230,11 +231,11 @@ class DataInterpreter(fx.Interpreter):
         args = self._process_args(n, args)
         kwargs = self._process_kwargs(n, kwargs)
 
-        results = DataLoader(save_path if save_path else [])
+        results = DataLoader(save_path or [])
         for arg, kwarg in zip(args, kwargs):
             self_obj, *arg = arg
             result = getattr(self_obj, target)(*arg, **kwarg)
-            results.add_sample(result)
+            results.add_sample(result) # TODO: when to move to cpu?
 
         return results
 
@@ -251,10 +252,10 @@ class DataInterpreter(fx.Interpreter):
         args = self._process_args(n, args)
         kwargs = self._process_kwargs(n, kwargs)
 
-        results = DataLoader(save_path if save_path else [])
+        results = DataLoader(save_path or [])
         for arg, kwarg in zip(args, kwargs):
             result = submod(*arg, **kwarg)
-            results.add_sample(result)
+            results.add_sample(result) # TODO: when to move to cpu?
 
         return results
     
@@ -311,6 +312,22 @@ class DataInterpreter(fx.Interpreter):
 
                     del self.env[to_delete]
 
+    @compatibility(is_backward_compatible=True)
+    def reinit_dataloader(self, args: Any) -> Any:
+
+        if not self.garbage_collect_values or not self.cache_data:
+            save_path = None
+        else:
+            node_names = self.named_nodes.keys()
+            save_path = 'init'
+            if save_path in node_names:
+                i = 0
+                while f'{save_path}{i}' in node_names:
+                    i += 1
+        
+        cache_path = os.path.join(self.cache_path, save_path)
+        os.makedirs(cache_path, exist_ok=True)
+        args = reinit_dataloader(args, save_path)
 
     @compatibility(is_backward_compatible=True)
     def initialize_env(self, *args, initial_env : Optional[Dict[Node, Any]] = None, enable_io_processing: bool = True) -> None:
@@ -318,7 +335,7 @@ class DataInterpreter(fx.Interpreter):
         if len(args) != 1:
             raise RuntimeError('DataInterpreter expects one dataloder!')
         
-        args = reinit_dataloader(args[0])
+        args = self.reinit_dataloader(args[0])
         self.env = initial_env if initial_env is not None else {}
 
         if enable_io_processing:
@@ -373,11 +390,11 @@ class DataInterpreter(fx.Interpreter):
 
                 del self.env[node]
 
-    def __del__(self):
+    def __del__(self): # TODO: __del__ -> clear
 
         del self.env
 
-        if hasattr(self, 'cache_data') and self.cache_data:
+        if self.garbage_collect_values and self.cache_data:
 
             try:
                 shutil.rmtree(self.cache_path)
