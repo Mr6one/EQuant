@@ -50,7 +50,7 @@ class QuantileObserver(MinMaxObserver):
     ) -> None:
         if not is_per_tensor(qscheme):
             raise NotImplementedError(
-                "MovingAverageMinMaxObserver's qscheme only support \
+                "QuantileObserver's qscheme only support \
                     torch.per_tensor_symmetric and torch.per_tensor_affine."
             )
         self.quantile = quantile
@@ -160,7 +160,7 @@ class QuantilePerChannelObserver(PerChannelMinMaxObserver):
     ) -> None:
         if not is_per_channel(qscheme):
             raise NotImplementedError(
-                "MovingAveragePerChannelMinMaxObserver's qscheme only support \
+                "QuantilePerChannelObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
             )
         super().__init__(
