@@ -178,7 +178,7 @@ def fuse_conv_conv1x1(
     else:
         graph_module = model
 
-    named_modules = dict(model.named_modules())
+    named_modules = dict(graph_module.named_modules())
 
     node: fx.Node
     for node in graph_module.graph.nodes:
