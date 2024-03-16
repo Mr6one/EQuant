@@ -1,3 +1,6 @@
+# NOTE: Subject of Deprication
+# Requires vast GPU memory or extra GPU -> CPU data transfers that highly slows computational process
+
 import os
 import glob
 import shutil
@@ -325,9 +328,12 @@ class DataInterpreter(fx.Interpreter):
                 while f'{save_path}{i}' in node_names:
                     i += 1
         
-        cache_path = os.path.join(self.cache_path, save_path)
-        os.makedirs(cache_path, exist_ok=True)
+        if save_path:
+            cache_path = os.path.join(self.cache_path, save_path)
+            os.makedirs(cache_path, exist_ok=True)
+
         args = reinit_dataloader(args, save_path)
+        return args
 
     @compatibility(is_backward_compatible=True)
     def initialize_env(self, *args, initial_env : Optional[Dict[Node, Any]] = None, enable_io_processing: bool = True) -> None:

@@ -7,12 +7,15 @@ import torch.nn as nn
 import torch.fx as fx
 from torch import Tensor
 import torch.nn.functional as F
+from torch.ao.quantization import disable_observer, disable_fake_quant, enable_fake_quant
 
+import warnings
 from typing import Any, Iterable, List, Tuple, Union
 
-from equant.core.match import has_bn, quantized, decompose_module
-from equant.core.subgraph import create_subgraph, collect_inputs_outputs_for_subgraph, model_forward
-from equant.core.quantizers.fake_quantize import FakeQuantizeTorchBase, disable_fake_quant, enable_fake_quant, disable_observer
+from equant.core.match.chain import _decompose_module
+from equant.core.match import has_bn, quantized
+from equant.core.subgraph import create_subgraph
+from equant.core.feature_extractor import collect_inputs_outputs_for_subgraph, model_forward
 from equant.core.interpreter import DataInterpreter
 
 
@@ -256,6 +259,59 @@ def adaround(
     warm_start: float = 0.2, 
     beta_range: Tuple = (20, 2), 
     reg_param: float = 0.01,
+    inplace: bool = False
+) -> fx.GraphModule:
+    
+    # TODO: Add progress bar
+    
+    if not inplace:
+        graph_module = copy.deepcopy(graph_module)
+
+    device = next(iter(graph_module.parameters())).device
+
+    graph_module.apply(enable_fake_quant)
+    fp_graph_module = copy.deepcopy(graph_module).apply(disable_fake_quant).apply(disable_observer)
+
+    graph_module.to(device)
+    fp_graph_module.to(device)
+
+    node: fx.Node
+    fp_node: fx.Node
+    for fp_node, node in zip(fp_graph_module.graph.nodes, graph_module.graph.nodes):
+
+        if node.op == 'call_module':
+            module = graph_module.get_submodule(node.target)
+
+            if quantized(module):
+
+                if has_bn(_decompose_module(module)):
+                    warnings.warn(f'Skipping {module} optimization as it contains batch \
+                                  normalization module. Consider using batchnorm fuse')
+                    continue
+
+                subgraph = create_subgraph(graph_module, [node.name, next(iter(node.users)).name])
+                quant_inputs, _ = collect_inputs_outputs_for_subgraph(graph_module, subgraph, dataloader)
+
+                fp_subgraph = create_subgraph(fp_graph_module, [fp_node.name, next(iter(fp_node.users)).name])
+                _, fp_outputs = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph, dataloader)
+
+                print(f'Optimizing {node.target}')
+                module.apply(disable_observer)
+                optimize_module(module, quant_inputs, fp_outputs, num_iters, lr, warm_start, beta_range, reg_param, device=device)
+                print('-' * 50)
+
+    return graph_module
+
+
+# NOTE: Subject of Deprication
+def fast_adaround(
+    graph_module: fx.GraphModule,
+    dataloader: Iterable,
+    num_iters: int = 10000, 
+    lr: float = 1e-3,
+    warm_start: float = 0.2, 
+    beta_range: Tuple = (20, 2), 
+    reg_param: float = 0.01,
     inplace: bool = False,
     cache_data: bool = False
 ) -> fx.GraphModule:
@@ -288,10 +344,12 @@ def adaround(
 
             if quantized(module):
 
-                if has_bn(decompose_module(module)):
+                if has_bn(_decompose_module(module)):
                     with torch.no_grad():
                         interpreter._run_node(node)
                         fp_interpreter._run_node(fp_node)
+                    warnings.warn(f'Skipping {module} optimization as it contains batch \
+                                  normalization module. Consider using batchnorm fuse')
                     continue
                 
                 fp_module = fp_graph_module.get_submodule(fp_node.target)

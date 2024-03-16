@@ -4,7 +4,7 @@ import torch.fx as fx
 from types import FunctionType
 from typing import List, Tuple, Union
 
-from equant.core.match.decompose import decompose_module, wrap_into_sequential
+from equant.core.match.decompose import _decompose_module
 
 
 __all__ = [
@@ -60,7 +60,7 @@ def match_module_pattern(
         return 1
     
     module = graph_module.get_submodule(node.target)
-    modules = wrap_into_sequential(decompose_module(module, to_float=True))
+    modules = _decompose_module(module)
 
     if backward:
         modules = modules[::-1]
@@ -74,7 +74,7 @@ def match_module_pattern(
             continue
 
         class_obj_patterns, _ = split_patterns(patterns[depth + i])
-        if not issubclass(type(module), class_obj_patterns):
+        if not isinstance(module, class_obj_patterns):
             return 0
     
     return len(modules)

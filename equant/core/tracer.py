@@ -1,3 +1,6 @@
+# NOTE: subject of deprication as QTracer is only used by create_qfeature_extractor function
+# which we replaced by more stable create_feature_extractor in subgraph.py
+
 import torch
 import torch.nn as nn
 import torch.fx as fx
@@ -23,7 +26,7 @@ class QTracer(NodePathTracer):
             (m.__module__.startswith("torch.nn") or m.__module__.startswith("torch.ao.nn"))
             and not isinstance(m, torch.nn.Sequential) or \
                 # don't trace fused modules, qat modules and quantizers
-                issubclass(type(m), (nni._FusedModule, nnqat.modules.linear.Linear, nnqat.modules.conv._ConvNd, 
+                isinstance(m, (nni._FusedModule, nnqat.modules.linear.Linear, nnqat.modules.conv._ConvNd, 
                                      nnqat.modules.embedding_ops.Embedding, FakeQuantize)) 
         )
     

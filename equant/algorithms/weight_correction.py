@@ -1,11 +1,11 @@
 import copy
-from typing import Union
-import torch
+import warnings
 from torch import Tensor
 import torch.nn as nn
 import torch.fx as fx
 
-from equant.core.match import decompose_module, has_bn, quantized
+from equant.core.match import has_bn, quantized
+from equant.core.match.chain import _decompose_module
 
 
 __all__ = [
@@ -67,14 +67,17 @@ def weight_correction(
         if node.op == 'call_module':
             module = graph_module.get_submodule(node.target)
 
+            # TODO: create_execution_plan
             if quantized(module):
 
-                modules = decompose_module(module)
+                modules = _decompose_module(module)
 
                 if has_bn(modules):
+                    warnings.warn(f'Skipping {module} optimization as it contains batch \
+                                  normalization module. Consider using batchnorm fuse')
                     continue
 
-                if not issubclass(type(modules[0]), LINEAR_LAYERS):
+                if not isinstance(modules[0], LINEAR_LAYERS):
                     continue
                 
                 fp_weight = modules[0].weight.data
@@ -83,7 +86,7 @@ def weight_correction(
                 module.weight.data = weight_correction_helper(
                     fp_weight, 
                     quant_weight, 
-                    transpose=issubclass(type(modules[0]), TRANSPOSED_LAYERS)
+                    transpose=isinstance(modules[0], TRANSPOSED_LAYERS)
                 )
 
     return graph_module

@@ -20,7 +20,7 @@ def create_identity_fused_conv(
 ):
     if conv.in_channels != conv.out_channels:
         raise RuntimeError(
-            f'Fusing invalid residual connection. Make sure in_channels = out_channels. Your in_channels = {conv.in_channels} and out_channels = {conv.out_channels}'
+            f'Fusing invalid residual connection. Make sure in_channels = out_channels. Got in_channels = {conv.in_channels} and out_channels = {conv.out_channels}'
         )
 
     identity = torch.empty_like(conv.weight.data)
@@ -53,6 +53,8 @@ def fuse_residuals(
     '''
     Fuse conv(x) + x
     '''
+
+    # TODO: add linear function support
     
     if not inplace:
         model = copy.deepcopy(model)

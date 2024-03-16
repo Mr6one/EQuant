@@ -16,7 +16,7 @@ def has_bn(module: Union[nn.Module, nn.Sequential]) -> bool:
         module = nn.Sequential(module)
     
     for m in module:
-        if issubclass(type(m), BNS):
+        if isinstance(m, BNS):
             return True
         
     return False

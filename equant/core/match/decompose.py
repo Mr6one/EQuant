@@ -7,20 +7,11 @@ from equant.core.match.module import quantized
 
 
 __all__ = [
-    'decompose_module',
-    'wrap_into_sequential'
+    'decompose_module'
 ]
 
 
-def wrap_into_sequential(module: nn.Module) -> nn.Sequential:
-    
-    if not isinstance(module, nn.Sequential):
-        module = nn.Sequential(module)
-
-    return module
-
-
-def decompose_quant_module(module: nn.Module) -> Union[nn.Module, nn.Sequential]:
+def _decompose_quant_module(module: nn.Module) -> nn.Sequential:
 
     if not quantized(module):
         raise RuntimeError(f'Module {type(module)} is not quantized')
@@ -39,7 +30,7 @@ def decompose_quant_module(module: nn.Module) -> Union[nn.Module, nn.Sequential]
     
     float_module = module.to_float()
     
-    if issubclass(type(float_module), nn.Sequential):
+    if isinstance(float_module, nn.Sequential):
         float_module, activation = float_module[0], float_module[1]
     else:
         activation = None
@@ -60,18 +51,24 @@ def decompose_quant_module(module: nn.Module) -> Union[nn.Module, nn.Sequential]
         modules.append(activation)
 
     modules = nn.Sequential(*modules)
-    if len(modules) == 1:
-        modules = modules[0]
 
     return modules
 
 
-def decompose_module(module: nn.Module, to_float: bool = False) -> Union[nn.Module, nn.Sequential]:
-    
+def decompose_quant_module(module: nn.Module) -> Union[nn.Module, nn.Sequential]:
+    modules = _decompose_quant_module(module)
+    if len(modules) == 1:
+        modules = modules[0]
+    return modules
+
+
+def _decompose_module(module: nn.Module) -> nn.Sequential:
+
     if quantized(module):
         module = decompose_quant_module(module)
 
-    module = wrap_into_sequential(module)
+    if not isinstance(module, nn.Sequential):
+        module = nn.Sequential(module)
 
     modules = []
     for m in module:
@@ -80,9 +77,16 @@ def decompose_module(module: nn.Module, to_float: bool = False) -> Union[nn.Modu
             m = m.to_float()
 
         modules.append(m)
-
-    if len(modules) == 1:
-        return modules[0]
     
     modules = nn.Sequential(*modules)
+    return modules
+
+
+def decompose_module(module: nn.Module) -> Union[nn.Module, nn.Sequential]:
+    
+    modules = _decompose_module(module)
+
+    if len(modules) == 1:
+        modules = modules[0]
+    
     return modules

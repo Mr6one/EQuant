@@ -1,11 +1,7 @@
 import copy
-import torch
 import torch.nn as nn
 import torch.fx as fx
-from torch import Tensor
-from typing import Any, Iterable, List, Tuple, Dict, Set, Union
-
-from equant.core.tracer import QTracer, create_qfeature_extractor
+from typing import Any, List, Tuple, Dict, Set, Union
 
 
 def add_node_inputs(
@@ -19,7 +15,7 @@ def add_node_inputs(
             
             if isinstance(arg, fx.Node):
                 subgraph_edges[node].add(arg)
-                if arg.op != 'get_attr' and arg.op != 'output' and arg.name not in subgraph_edges:
+                if arg.op != 'get_attr' and arg.op != 'output' and arg not in subgraph_edges:
                     input_nodes.add(arg.name)
 
             elif isinstance(arg, (tuple, list)):
@@ -36,7 +32,7 @@ def add_node_outputs(
 ) -> None:
     
     for output in node.users:
-        if output.name not in subgraph_edges:
+        if output not in subgraph_edges:
             if node.op != 'get_attr':
                 output_nodes.add(node.name)
         else:
@@ -187,88 +183,3 @@ def create_subgraph(
     subgraph_module.graph.eliminate_dead_code()
 
     return subgraph_module
-
-
-def model_forward(
-    model: nn.Module, 
-    data: Union[Tensor, List, Tuple, Dict], 
-    device: torch.device
-) -> Any:
-
-    if isinstance(data, (list, tuple)):
-        data = [d.to(device) for d in data]
-        data = model(*data)
-    elif isinstance(data, dict):
-        data = {k: v.to(device) for k, v in data.items()}
-        data = model(**data)
-    elif isinstance(data, Tensor):
-        data = data.to(device)
-        data = model(data)
-    else:
-        raise RuntimeError(f'Unsupported input of type {type(data)}')
-    
-    return data
-
-
-@torch.no_grad()
-def collect_inputs_outputs_for_subgraph(
-    model: fx.GraphModule, 
-    subgraph: fx.GraphModule, 
-    dataloader: Iterable
-) -> Any:
-    
-    input_nodes = [node.name for node in subgraph.graph.nodes if node.op == 'placeholder']
-    output_nodes = []
-
-    for node in subgraph.graph.nodes:
-        if node.op == 'output':
-            if isinstance(node.args[0], (tuple, list)):
-                for arg in node.args[0]:
-                    output_nodes.append(arg.name)
-            else:
-                output_nodes.append(node.args[0].name)
-
-    return_nodes = input_nodes + output_nodes
-
-    tracer = QTracer()
-    tracer.trace(model)
-
-    node_to_qualname = {node.name: qualname for node, qualname in tracer.node_to_qualname.items()}
-    qualname_to_node = {qualname: node.name for node, qualname in tracer.node_to_qualname.items()}
-
-    return_nodes = [node_to_qualname[node] for node in return_nodes]
-    feature_extractor = create_qfeature_extractor(model, return_nodes=return_nodes)
-
-    device = next(iter(model.parameters())).device
-
-    inputs = []
-    outputs = []
-
-    for data in dataloader:
-
-        data = model_forward(feature_extractor, data, device)
-        
-        data_inputs = []
-        data_outputs = []
-
-        for k, v in data.items():
-
-            k = qualname_to_node[k]
-            v = v.detach().cpu()
-
-            if k in output_nodes:
-                data_outputs.append(v)
-            
-            if k in input_nodes:
-                data_inputs.append(v)
-
-        if len(data_inputs) == 1:
-            data_inputs = data_inputs[0]
-
-        if len(data_outputs) == 1:
-            data_outputs = data_outputs[0]
-
-        inputs.append(data_inputs)
-        outputs.append(data_outputs)
-
-    return inputs, outputs

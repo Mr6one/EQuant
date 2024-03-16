@@ -7,7 +7,7 @@ import torch.fx as fx
 
 from typing import List, Union
 
-from equant.core.match import decompose_module, find_chain_forward
+from equant.core.match.chain import _decompose_module, find_chain_forward
 
 
 __all__ = [
@@ -29,7 +29,7 @@ def get_range(
     out_channel: bool
 ) -> Tensor:
     
-    if issubclass(type(linear), nn.Linear):
+    if isinstance(linear, nn.Linear):
         groups = 1
     else:
         groups = linear.groups
@@ -40,7 +40,7 @@ def get_range(
 
     weight = linear.weight.data.reshape(groups, out_channels // groups, *size[1:])
 
-    if issubclass(type(linear), (nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d)):
+    if isinstance(linear, (nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d)):
         weight = weight.transpose(1, 2)
 
     if out_channel:
@@ -59,7 +59,7 @@ def scale_weight(
     out_channel: bool
 ) -> Tensor:
     
-    if issubclass(type(linear), nn.Linear):
+    if isinstance(linear, nn.Linear):
         groups = 1
     else:
         groups = linear.groups
@@ -70,7 +70,7 @@ def scale_weight(
     weight = linear.weight.data.reshape(groups, out_channels // groups, *size[1:])
     scale = scale.reshape(groups, -1, *scale.size()[1:])
 
-    if issubclass(type(linear), (nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d)):
+    if isinstance(linear, (nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d)):
         weight = weight.transpose(1, 2)
 
     if out_channel:
@@ -80,7 +80,7 @@ def scale_weight(
 
     weight = weight * scale.to(weight.device)
 
-    if issubclass(type(linear), (nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d)):
+    if isinstance(linear, (nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d)):
         weight = weight.transpose(1, 2)
 
     weight = weight.reshape(*size)
@@ -153,8 +153,8 @@ def cross_layer_equalization(
         linear1 = graph_module.get_submodule(chain[0].target)
         linear2 = graph_module.get_submodule(chain[-1].target)
 
-        linear1 = decompose_module(linear1)[0]
-        linear2 = decompose_module(linear2)[0]
+        linear1 = _decompose_module(linear1)[0]
+        linear2 = _decompose_module(linear2)[0]
 
         cross_layer_equalization_helper(linear1, linear2)
 
