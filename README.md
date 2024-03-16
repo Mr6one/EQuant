@@ -21,15 +21,18 @@ qconfig = [
             'dtype': 's8',
             'qscheme': 'per_channel_symmetric',
             'observer': 'min_max',
-            'quantizer': 'base'
+            'quantizer': 'lsq'
         },
         'activation': {
             'dtype': 'u8',
             'qscheme': 'per_tensor_affine',
-            'observer': 'min_max',
-            'quantizer': 'base'
+            'observer': 'quantile',
+            'observer_kwargs': {
+                'quantile': 0.99999
+            },
+            'quantizer': 'lsq'
         },
-        'layers': # list of layers for quantization
+        'layers': ['*'], # quantize all layers
     }
 ]
 
@@ -40,7 +43,7 @@ qconfig_mapping = generate_qconfig_mapping(model, qconfig)
 qmodel = quantize(model, qconfig_mapping, example_inputs)
 
 # calibrate model
-for data in dataloder:
+for data in dataloader:
     _ = qmodel(data)
 
 # convert the fake-quantized model to a quantized model
@@ -61,7 +64,7 @@ qconfig = [
         'activation': {
             # quantization recipe for activations
         },
-        'layers': # list of layers for this scheme
+        'layers': [...], # list of layers for this scheme
     },
     # scheme 2
     {
@@ -71,7 +74,7 @@ qconfig = [
         'activation': {
             # another quantization recipe for activations
         },
-        'layers': # list of layers for this scheme
+        'layers': [...], # list of layers for this scheme
     }
     # scheme 3
     ...
@@ -89,23 +92,27 @@ Each quantization recipe (for both weights and activations) contains information
     * per_channel_symmetric
     * per_channel_affine
 
+* Quantizer &mdash; one of the followings:
+    * fixed_qparams &mdash; scales and offsets are frozen
+    * lsq &mdash; enables learnable scales, based on [Learned Step Size Quantization](https://arxiv.org/abs/1902.08153)
+    * lsq+ &mdash; enables learnable scales and offsets, based on [LSQ+: Improving low-bit quantization through learnable offsets and better initialization](https://arxiv.org/abs/2004.09576)
+
 * Observer &mdash; one of the followings:
     * min_max
     * moving_average
     * quantile
+    * mse
     * histogram (supports only per tensor granularity)
 
-* Quantizer &mdash; one of the followings:
-    * torch_base &mdash; scales and offsets are frozen
-    * base &mdash; enables learnable scales and offsets
-    * lsq &mdash; based on [Learned Step Size Quantization](https://arxiv.org/abs/1902.08153)
+* Observer parameters
+
+#### *Note*: in case of mse observer during calibration phase its highly recommended to use batch size as much as possible.
 
 ## QConfigMapping
 
-QConfigMapping allows to save quantization scheme in yaml format to avoid its generation every time. Moreover, you can make sure that it was generated correctly and contains right information:
+QConfigMapping is a PyTorch format to store quantization recipe. It also allows to save quantization scheme in yaml format to avoid its generation every time. Moreover, you can make sure that it was generated correctly and contains right information:
 
 ``` python
-
 # generate qconfig mapping only once...
 qconfig_mapping = generate_qconfig_mapping(...)
 
@@ -122,6 +129,8 @@ You are free to edit configuration file while it preserves correct values.
 
 There may be a large accuracy drop after PTQ stage and therefore there exists numerous bunch of methods to improve quantized model quality. EQuant provides implementation for some of them:
 
+### Pre-calibration algorithms
+
 * Cross-Layer Equalization
 
 ```python
@@ -137,8 +146,10 @@ model = cross_layer_equalization(model)
 from equant.algorithms import smooth_quant
 
 
-model = smooth_quant(model, qconfig_mapping, dataloder)
+qmodel = smooth_quant(qmodel, dataloader)
 ```
+
+### Post-calibration algorithms
 
 * Bias Correction
 
@@ -146,7 +157,7 @@ model = smooth_quant(model, qconfig_mapping, dataloder)
 from equant.algorithms import bias_correction
 
 
-qmodel = bias_correction(qmodel, dataloder)
+qmodel = bias_correction(qmodel, dataloader)
 ```
 
 * AdaRound
@@ -155,7 +166,7 @@ qmodel = bias_correction(qmodel, dataloder)
 from equant.algorithms import adaround
 
 
-qmodel = adaround(qmodel, dataloder)
+qmodel = adaround(qmodel, dataloader)
 ```
 
 ### Cross-Layer Equalization
@@ -229,3 +240,5 @@ model = fuse_residuals(model)
 * [Up or Down? Adaptive Rounding for Post-Training Quantization](https://arxiv.org/abs/2004.10568)
 
 * [Learned Step Size Quantization](https://arxiv.org/abs/1902.08153)
+
+* [LSQ+: Improving low-bit quantization through learnable offsets and better initialization](https://arxiv.org/abs/2004.09576)
