@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from typing import Iterable, List, Dict, Tuple, Union
-from equant.core.subgraph import model_forward
+from equant.core.feature_extractor import model_forward
 
 
 LINEAR_LAYERS = (

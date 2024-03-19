@@ -5,6 +5,7 @@ import torch
 import torch.fx as fx
 import torch.nn as nn
 from torch import Tensor
+from torch.hub import tqdm
 import torch.nn.functional as F
 from torch.ao.quantization.fake_quantize import FakeQuantize, disable_observer, disable_fake_quant, enable_fake_quant, enable_observer
 
@@ -12,7 +13,7 @@ from typing import Iterable, List, Dict, Union
 
 from equant.core.match import find_chain_forward, find_chain_backward, quantized
 from equant.core.match.chain import _decompose_module
-from equant.core.observers.utils import reset_observer
+from equant.observers.utils import reset_observer
 from equant.core.subgraph import create_subgraph
 from equant.core.feature_extractor import collect_inputs_outputs_for_subgraph, model_forward
 from equant.core.interpreter import DataInterpreter
@@ -33,7 +34,7 @@ def insert_identity_quant_linear_layer(
     named_modules: Dict[str, nn.Module]
 ) -> None:
     
-    # TODO: Fix observer insertion rule!
+    # TODO: Fix observer insertion rule (check onnx graph for this issue)
 
     linear2 = graph_module.get_submodule(node.target).to_float()
 
@@ -172,6 +173,27 @@ def find_optimal_alpha(
     return optimal_aplha
 
 
+def create_execution_plan(
+    graph_module: fx.GraphModule
+) -> List[List[fx.Node]]:
+    
+    chains2optimize = []
+    for node in graph_module.graph.nodes:
+
+        chain = find_smooth_quant_chain_with_quantizers_forward(node, graph_module)
+
+        if chain is None:
+            continue
+
+        module = graph_module.get_submodule(chain[-1].target)
+        if not quantized(module):
+            continue
+
+        chains2optimize.append(chain)
+
+    return chains2optimize
+
+
 @torch.no_grad()
 def smooth_quant_auto_tune(
     model: Union[nn.Module, fx.GraphModule],
@@ -182,7 +204,8 @@ def smooth_quant_auto_tune(
     absorb: bool = True,
     iters: Union[None, int] = None,
     quantile: float = 0.99999,
-    inplace: bool = False
+    inplace: bool = False,
+    verbose: bool =  True
 ) -> fx.GraphModule:
     
     if not inplace:
@@ -201,17 +224,10 @@ def smooth_quant_auto_tune(
     fp_graph_module = copy.deepcopy(graph_module).apply(disable_fake_quant).apply(disable_observer)
     graph_module.apply(enable_observer).apply(enable_fake_quant)
 
-    node: fx.Node
-    for node in graph_module.graph.nodes:
-
-        chain = find_smooth_quant_chain_with_quantizers_forward(node, graph_module)
-
-        if chain is None:
-            continue
-
-        module = graph_module.get_submodule(chain[-1].target)
-        if not quantized(module):
-            continue
+    chains2optimize = create_execution_plan(graph_module)
+    pbar = tqdm(total=len(chains2optimize), desc='smooth quant auto-tune', initial=0, position=0, leave=True, disable=not verbose, delay=0)
+    for chain in chains2optimize:
+        pbar.update(1)
             
         linear1 = graph_module.get_submodule(chain[0].target)
         linear2 = graph_module.get_submodule(chain[-1].target)
@@ -220,15 +236,12 @@ def smooth_quant_auto_tune(
         linear2 = _decompose_module(linear2)[0]
 
         subgraph_module = create_subgraph(graph_module, node_names=[node.name for node in chain])
-
-        # TODO: use function for chain input/output collection
         subgraph_module.apply(disable_observer).apply(disable_fake_quant)
         quant_inputs, _ = collect_inputs_outputs_for_subgraph(graph_module, subgraph_module, dataloader)
 
         fp_subgraph_module = create_subgraph(fp_graph_module, node_names=[node.name for node in chain])
         _, fp_outputs = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph_module, dataloader)
        
-
         observer = add_observers(subgraph_module, quantile=quantile)
         calibrate(subgraph_module, quant_inputs, iters)
         activations_max_abs = observer.get_max_abs()

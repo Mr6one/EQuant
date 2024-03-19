@@ -2,7 +2,12 @@ import torch.nn as nn
 from torch.ao.quantization.fake_quantize import FakeQuantize, _is_fake_quant_script_module
 
 
-def reset_observers(mod: nn.Module) -> None:
+__all__ = [
+    'reset_observer'
+]
+
+
+def reset_observer(mod: nn.Module) -> None:
     """
     Resets observation statistics for this module, if applicable.
     """

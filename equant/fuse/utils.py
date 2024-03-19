@@ -6,6 +6,7 @@ from typing import Dict, Tuple, Any
 
 BNS = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)
 CONVS = (nn.Conv1d, nn.Conv2d, nn.Conv3d)
+LINEAR = (*CONVS, nn.Linear)
 
 
 __all__ = [

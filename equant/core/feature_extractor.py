@@ -10,6 +10,12 @@ from typing import Any, Iterable, List, Tuple, Dict, Union
 from equant.core.tracer import QTracer, create_qfeature_extractor
 
 
+__all__ = [
+    'model_forward',
+    'collect_inputs_outputs_for_subgraph'
+]
+
+
 def model_forward(
     model: nn.Module, 
     data: Union[Tensor, List, Tuple, Dict], 
@@ -132,7 +138,7 @@ def collect_inputs_outputs_for_subgraph(
     return inputs, outputs
 
 
-# TODO: subject of deprication, remove this for release
+# NOTE: subject of deprication, remove this for release
 @torch.no_grad()
 def __collect_inputs_outputs_for_subgraph(
     model: fx.GraphModule, 
@@ -160,7 +166,6 @@ def __collect_inputs_outputs_for_subgraph(
     if len(model.graph.nodes) - 1 != len(tracer.node_to_qualname):
         raise RuntimeError('Feature extractor has incompatible number of nodes')
 
-    # TODO: come up with more stable solution (rewrite create_qfeature_extractor), we don't gurantee the node order
     node_to_qualname = {node.name: qualname for node, qualname in zip(model.graph.nodes, tracer.node_to_qualname.values())}
     qualname_to_node = {qualname: node.name for node, qualname in zip(model.graph.nodes, tracer.node_to_qualname.values())}
     # -----------------------------------------------------------------------------------------------------------------------

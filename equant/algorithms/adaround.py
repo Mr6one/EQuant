@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.fx as fx
 from torch import Tensor
+from torch.hub import tqdm
 import torch.nn.functional as F
 from torch.ao.quantization import disable_observer, disable_fake_quant, enable_fake_quant
 
@@ -18,6 +19,11 @@ from equant.core.subgraph import create_subgraph
 from equant.core.feature_extractor import collect_inputs_outputs_for_subgraph, model_forward
 from equant.core.interpreter import DataInterpreter
 
+
+SUPPORTED_LAYERS = (
+    nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.ConvTranspose1d,
+    nn.ConvTranspose2d, nn.ConvTranspose3d, nn.Linear, nn.Embedding
+)
 
 __all__ = [
     'adaround'
@@ -201,7 +207,7 @@ def optimize_module(
 
     weight_fake_quant = module.weight_fake_quant
     module.weight_fake_quant = AdaRoundFakeQuant(
-        module.weight, # TODO: optimize only linear layers to avoid error if weight attribute isn't defined?
+        module.weight,
         weight_fake_quant.scale.detach(), 
         weight_fake_quant.zero_point.detach(),
         weight_fake_quant.activation_post_process.quant_min,
@@ -251,6 +257,37 @@ def optimize_module(
                 return
 
 
+def create_execution_plan(
+    quant_graph_module: fx.GraphModule, 
+    fp_graph_module: fx.GraphModule
+) -> List[Tuple[fx.Node, fx.Node]]:
+    
+    nodes2optimize = []
+    fp_node: fx.Node
+    quant_node: fx.Node
+    for fp_node, quant_node in zip(fp_graph_module.graph.nodes, quant_graph_module.graph.nodes):
+
+        if quant_node.op == 'call_module':
+            module = quant_graph_module.get_submodule(quant_node.target)
+
+            if quantized(module):
+
+                decomposed_module = _decompose_module(module)
+                if not isinstance(decomposed_module[0], SUPPORTED_LAYERS):
+                    warnings.warn(f'{module} optimization will be skipped as AdaRound supports only \
+                                    {SUPPORTED_LAYERS} layers, but found layer of type {type(decomposed_module[0])}')
+                    continue
+
+                if has_bn(decomposed_module):
+                    warnings.warn(f'{module} optimization will be skipped as it contains \
+                                   batch normalization module. Consider using batchnorm fuse')
+                    continue
+
+                nodes2optimize.append((fp_node, quant_node))
+
+    return nodes2optimize
+
+
 def adaround(
     graph_module: fx.GraphModule,
     dataloader: Iterable,
@@ -259,46 +296,31 @@ def adaround(
     warm_start: float = 0.2, 
     beta_range: Tuple = (20, 2), 
     reg_param: float = 0.01,
-    inplace: bool = False
+    inplace: bool = False,
+    verbose: bool = True
 ) -> fx.GraphModule:
-    
-    # TODO: Add progress bar
     
     if not inplace:
         graph_module = copy.deepcopy(graph_module)
 
     device = next(iter(graph_module.parameters())).device
+    graph_module.apply(disable_observer).apply(enable_fake_quant).to(device)
+    fp_graph_module = copy.deepcopy(graph_module).apply(disable_fake_quant).to(device)
 
-    graph_module.apply(enable_fake_quant)
-    fp_graph_module = copy.deepcopy(graph_module).apply(disable_fake_quant).apply(disable_observer)
+    nodes2optimize = create_execution_plan(graph_module, fp_graph_module)
+    pbar = tqdm(total=len(nodes2optimize), desc='adaround', initial=0, position=0, leave=True, disable=not verbose, delay=0)
+    for fp_node, node in nodes2optimize:
+        pbar.update(1)
+        subgraph = create_subgraph(graph_module, [node.name, next(iter(node.users)).name])
+        quant_inputs, _ = collect_inputs_outputs_for_subgraph(graph_module, subgraph, dataloader)
 
-    graph_module.to(device)
-    fp_graph_module.to(device)
-
-    node: fx.Node
-    fp_node: fx.Node
-    for fp_node, node in zip(fp_graph_module.graph.nodes, graph_module.graph.nodes):
-
-        if node.op == 'call_module':
-            module = graph_module.get_submodule(node.target)
-
-            if quantized(module):
-
-                if has_bn(_decompose_module(module)):
-                    warnings.warn(f'Skipping {module} optimization as it contains batch \
-                                  normalization module. Consider using batchnorm fuse')
-                    continue
-
-                subgraph = create_subgraph(graph_module, [node.name, next(iter(node.users)).name])
-                quant_inputs, _ = collect_inputs_outputs_for_subgraph(graph_module, subgraph, dataloader)
-
-                fp_subgraph = create_subgraph(fp_graph_module, [fp_node.name, next(iter(fp_node.users)).name])
-                _, fp_outputs = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph, dataloader)
-
-                print(f'Optimizing {node.target}')
-                module.apply(disable_observer)
-                optimize_module(module, quant_inputs, fp_outputs, num_iters, lr, warm_start, beta_range, reg_param, device=device)
-                print('-' * 50)
+        fp_subgraph = create_subgraph(fp_graph_module, [fp_node.name, next(iter(fp_node.users)).name])
+        _, fp_outputs = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph, dataloader)
+        
+        module = graph_module.get_submodule(node.target)
+        print(f'Optimizing {node.target}')
+        optimize_module(module, quant_inputs, fp_outputs, num_iters, lr, warm_start, beta_range, reg_param, device=device)
+        print('-' * 50)
 
     return graph_module
 
@@ -315,8 +337,6 @@ def fast_adaround(
     inplace: bool = False,
     cache_data: bool = False
 ) -> fx.GraphModule:
-    
-    # TODO: Add progress bar
     
     if not inplace:
         graph_module = copy.deepcopy(graph_module)
@@ -344,7 +364,16 @@ def fast_adaround(
 
             if quantized(module):
 
-                if has_bn(_decompose_module(module)):
+                decomposed_module = _decompose_module(module)
+                if not isinstance(decomposed_module[0], SUPPORTED_LAYERS):
+                    with torch.no_grad():
+                        interpreter._run_node(node)
+                        fp_interpreter._run_node(fp_node)
+                    warnings.warn(f'Skipping {module} optimization as it AdaRound support only \
+                                  {SUPPORTED_LAYERS} layers, but found layer of type {type(decomposed_module[0])}')
+                    continue
+
+                if has_bn(decomposed_module):
                     with torch.no_grad():
                         interpreter._run_node(node)
                         fp_interpreter._run_node(fp_node)

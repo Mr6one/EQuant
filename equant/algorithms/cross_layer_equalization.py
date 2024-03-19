@@ -4,8 +4,9 @@ import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
 import torch.fx as fx
+from torch.hub import tqdm
 
-from typing import List, Union
+from typing import List, Union, Tuple
 
 from equant.core.match.chain import _decompose_module, find_chain_forward
 
@@ -129,9 +130,34 @@ def find_cle_chain(
     return None
 
 
+def create_execution_plan(
+    graph_module: fx.GraphModule
+) -> List[Tuple[nn.Module, nn.Module]]:
+    
+    modules2optimize = []
+    node: fx.Node
+    for node in graph_module.graph.nodes:
+        
+        chain = find_cle_chain(node, graph_module)
+
+        if chain is None:
+            continue
+
+        linear1 = graph_module.get_submodule(chain[0].target)
+        linear2 = graph_module.get_submodule(chain[-1].target)
+
+        linear1 = _decompose_module(linear1)[0]
+        linear2 = _decompose_module(linear2)[0]
+
+        modules2optimize.append((linear1, linear2))
+
+    return modules2optimize
+
+
 def cross_layer_equalization(
     model: Union[nn.Module, fx.GraphModule],
-    inplace: bool = False
+    inplace: bool = False,
+    verbose: bool = True
 ) -> fx.GraphModule:
     
     if not inplace:
@@ -142,20 +168,10 @@ def cross_layer_equalization(
     else:
         graph_module = model
 
-    node: fx.Node
-    for node in graph_module.graph.nodes:
-        
-        chain = find_cle_chain(node, graph_module)
-
-        if chain is None:
-            continue
-        
-        linear1 = graph_module.get_submodule(chain[0].target)
-        linear2 = graph_module.get_submodule(chain[-1].target)
-
-        linear1 = _decompose_module(linear1)[0]
-        linear2 = _decompose_module(linear2)[0]
-
+    modules2optimize = create_execution_plan(graph_module)
+    pbar = tqdm(total=len(modules2optimize), desc='cross-layer equalization', initial=0, position=0, leave=True, disable=not verbose, delay=0)
+    for linear1, linear2 in modules2optimize:
+        pbar.update(1)
         cross_layer_equalization_helper(linear1, linear2)
 
     return graph_module

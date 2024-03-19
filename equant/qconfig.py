@@ -11,8 +11,8 @@ from torch.ao.quantization import QConfigMapping as _QConfigMapping, QConfig
 from torch.quantization.observer import HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, \
     MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver
 
-from equant.core.observers import QuantileObserver, QuantilePerChannelObserver, MSEObserver, MSEPerChannelObserver
-from equant.core.quantizers import FixedQParamsFakeQuantize, FakeQuantizeLSQ, FakeQuantizeLSQPlus
+from equant.observers import QuantileObserver, QuantilePerChannelObserver, MSEObserver, MSEPerChannelObserver
+from equant.quantizers import FixedQParamsFakeQuantize, FakeQuantizeLSQ, FakeQuantizeLSQPlus
 
 
 __all__ = [
@@ -72,7 +72,7 @@ def validate_quantizer(quantizer: nn.Module) -> None:
 def validate_observer(observer: nn.Module) -> None:
 
     if observer not in OBSERVERS:
-        raise ValueError(f'Invalid quantizer {observer}')
+        raise ValueError(f'Invalid observer {observer}')
 
 
 def validate_layers(layers: List[str], module_names: Set[str]) -> None:
@@ -128,7 +128,7 @@ def parse_dtype(dtype: str) -> Tuple[str, str]:
 def create_quantizer_from_dict(config: Dict) -> nn.Module:
 
     sign, n_bits = parse_dtype(config['dtype'])
-    dtype = {'u': torch.quint8,'s': torch.qint8}[sign]
+    dtype = {'u': torch.quint8, 's': torch.qint8}[sign]
 
     if dtype == torch.qint8:
         quant_min, quant_max = -2 ** (n_bits - 1), 2 ** (n_bits - 1) - 1

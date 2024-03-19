@@ -1,13 +1,15 @@
 import copy
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.fx as fx
+from torch.hub import tqdm
 from torch.ao.quantization import disable_observer, disable_fake_quant, enable_fake_quant
 
 import warnings
-from typing import Any, Iterable
+from typing import Any, Iterable, List, Tuple
 
-from equant.core.match.chain import _decompose_module
+from equant.core.match.decompose import _decompose_module, _decompose_quant_module
 from equant.core.match import has_bn, quantized
 from equant.core.subgraph import create_subgraph
 from equant.core.feature_extractor import collect_inputs_outputs_for_subgraph, model_forward
@@ -60,72 +62,94 @@ def collect_decomposed_module_inputs_outputs(
     return modules_inputs, modules_outputs
 
 
-@torch.no_grad()
-def bias_correction(
-    graph_module: fx.GraphModule,
-    dataloader: Iterable,
-    inplace: bool = False,
-    cache_data: bool = False
-) -> fx.GraphModule:
+def compute_bias(
+    fp_graph_module: fx.GraphModule, 
+    graph_module: fx.GraphModule, 
+    fp_node: fx.Node, 
+    quant_node: fx.Node, 
+    dataloader: Iterable, 
+    device: torch.device
+) -> Tensor:
+
+    fp_module = fp_graph_module.get_submodule(fp_node.target)
+    fp_modules = _decompose_module(fp_module)
+    fp_subgraph = create_subgraph(fp_graph_module, [fp_node.name])
+    fp_inputs = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph, dataloader)
+    _, fp_outputs = collect_decomposed_module_inputs_outputs(fp_modules, fp_inputs, device, start=0, end=1)
     
-    # TODO: Add progress bar
+    quant_module = graph_module.get_submodule(quant_node.target)
+    quant_modules = _decompose_quant_module(quant_module)
+    quant_subgraph = create_subgraph(graph_module, [quant_node.name])
+    quant_inputs = collect_inputs_outputs_for_subgraph(graph_module, quant_subgraph, dataloader)
+    _, quant_outputs = collect_decomposed_module_inputs_outputs(quant_modules, quant_inputs, device, start=0, end=1)
+
+    if isinstance(_decompose_module(quant_module)[0], nn.Linear):
+        fp_outputs = fp_outputs.transpose(0, -1)
+        quant_outputs = quant_outputs.transpose(0, -1)
+    else:
+        fp_outputs = fp_outputs.transpose(0, 1)
+        quant_outputs = quant_outputs.transpose(0, 1)
+
+    bias = (fp_outputs - quant_outputs).flatten(start_dim=1).mean(dim=1)
+    return bias
+
+
+def create_execution_plan(
+    quant_graph_module: fx.GraphModule, 
+    fp_graph_module: fx.GraphModule
+) -> List[Tuple[fx.Node, fx.Node]]:
     
-    if not inplace:
-        graph_module = copy.deepcopy(graph_module)
-
-    graph_module.apply(disable_observer)
-    device = next(iter(graph_module.parameters())).device
-    fp_graph_module = copy.deepcopy(graph_module).apply(disable_fake_quant)
-
-    named_modules = dict(graph_module.named_modules())
-
-    node: fx.Node
+    nodes2optimize = []
     fp_node: fx.Node
-    for fp_node, node in zip(fp_graph_module.graph.nodes, graph_module.graph.nodes):
+    quant_node: fx.Node
+    for fp_node, quant_node in zip(fp_graph_module.graph.nodes, quant_graph_module.graph.nodes):
 
-        if node.op == 'call_module':
-            module = graph_module.get_submodule(node.target)
-
+        if quant_node.op == 'call_module':
+            module = quant_graph_module.get_submodule(quant_node.target)
+            modules = _decompose_module(module)
             if quantized(module):
-                modules = _decompose_module(module)
 
                 if not isinstance(modules[0], LINEAR_LAYERS):
                     continue
 
                 if has_bn(modules):
-                    warnings.warn(f'Skipping {module} optimization as it contains batch \
-                                  normalization module. Consider using batchnorm fuse')
+                    warnings.warn(f'{module} optimization will be skipped as it contains \
+                                  batch normalization module. Consider using batchnorm fuse')
                     continue
-                
-                fp_module = fp_graph_module.get_submodule(fp_node.target)
-                fp_modules = _decompose_module(fp_module)
 
-                quant_subgraph = create_subgraph(graph_module, [node.name])
-                quant_inputs = collect_inputs_outputs_for_subgraph(graph_module, quant_subgraph, dataloader)
+                nodes2optimize.append((fp_node, quant_node))
 
-                fp_subgraph = create_subgraph(fp_graph_module, [fp_node.name])
-                fp_inputs = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph, dataloader)
-                
-                _, quant_outputs = collect_decomposed_module_inputs_outputs(modules, quant_inputs, device, start=0, end=1)
-                _, fp_outputs = collect_decomposed_module_inputs_outputs(fp_modules, fp_inputs, device, start=0, end=1)
+    return nodes2optimize
 
-                if isinstance(modules[0], nn.Linear):
-                    fp_outputs = fp_outputs.transpose(0, -1)
-                    quant_outputs = quant_outputs.transpose(0, -1)
-                else:
-                    fp_outputs = fp_outputs.transpose(0, 1)
-                    quant_outputs = quant_outputs.transpose(0, 1)
 
-                bias_correction = (fp_outputs - quant_outputs).flatten(start_dim=1).mean(dim=1)
+@torch.no_grad()
+def bias_correction(
+    graph_module: fx.GraphModule,
+    dataloader: Iterable,
+    inplace: bool = False,
+    verbose: bool = True
+) -> fx.GraphModule:
+    
+    if not inplace:
+        graph_module = copy.deepcopy(graph_module)
 
-                if module.bias is not None:
-                    module.bias.data = module.bias.data + bias_correction
-                else:
-                    module.bias = nn.Parameter(bias_correction)
+    graph_module.apply(disable_observer).apply(enable_fake_quant)
+    device = next(iter(graph_module.parameters())).device
+    named_modules = dict(graph_module.named_modules())
 
-                replace_node_module(node, named_modules, module)
+    fp_graph_module = copy.deepcopy(graph_module).apply(disable_fake_quant)
+    nodes2optimize = create_execution_plan(graph_module, fp_graph_module)
+    pbar = tqdm(total=len(nodes2optimize), desc='bias correction', initial=0, position=0, leave=True, disable=not verbose, delay=0)
+    for fp_node, quant_node in nodes2optimize:
+        pbar.update(1)
+        bias = compute_bias(fp_graph_module, graph_module, fp_node, quant_node, dataloader, device)
+        quant_module = graph_module.get_submodule(quant_node.target)
+        if quant_module.bias is not None:
+            quant_module.bias.data = quant_module.bias.data + bias
+        else:
+            quant_module.bias = nn.Parameter(bias)
 
-    graph_module.apply(enable_fake_quant)
+        replace_node_module(quant_node, named_modules, quant_module)
 
     return graph_module
 
@@ -138,8 +162,6 @@ def fast_bias_correction(
     inplace: bool = False,
     cache_data: bool = False
 ) -> fx.GraphModule:
-    
-    # TODO: Add progress bar
     
     if not inplace:
         graph_module = copy.deepcopy(graph_module)

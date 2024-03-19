@@ -3,9 +3,12 @@ import warnings
 from torch import Tensor
 import torch.nn as nn
 import torch.fx as fx
+from torch.hub import tqdm
+
+from typing import List
 
 from equant.core.match import has_bn, quantized
-from equant.core.match.chain import _decompose_module
+from equant.core.match.decompose import _decompose_module, _decompose_quant_module
 
 
 __all__ = [
@@ -53,40 +56,55 @@ def weight_correction_helper(
     return corrected_weight
 
 
-def weight_correction(
-    graph_module: fx.GraphModule,
-    inplace: bool = False
-) -> fx.GraphModule:
+def create_execution_plan(
+    graph_module: fx.GraphModule
+) -> List[nn.Module]:
     
-    if not inplace:
-        graph_module = copy.deepcopy(graph_module)
-
+    modules2optimize = []
     node: fx.Node
     for node in graph_module.graph.nodes:
 
         if node.op == 'call_module':
             module = graph_module.get_submodule(node.target)
 
-            # TODO: create_execution_plan
             if quantized(module):
 
                 modules = _decompose_module(module)
 
                 if has_bn(modules):
-                    warnings.warn(f'Skipping {module} optimization as it contains batch \
-                                  normalization module. Consider using batchnorm fuse')
+                    warnings.warn(f'{module} optimization will be skipped as it contains \
+                                  batch normalization module. Consider using batchnorm fuse')
                     continue
 
                 if not isinstance(modules[0], LINEAR_LAYERS):
                     continue
-                
-                fp_weight = modules[0].weight.data
-                quant_weight = modules[0].weight_fake_quant(fp_weight)
 
-                module.weight.data = weight_correction_helper(
-                    fp_weight, 
-                    quant_weight, 
-                    transpose=isinstance(modules[0], TRANSPOSED_LAYERS)
-                )
+                modules2optimize.append(module)
+
+    return modules2optimize
+
+
+def weight_correction(
+    graph_module: fx.GraphModule,
+    inplace: bool = False,
+    verbose: bool = True
+) -> fx.GraphModule:
+    
+    if not inplace:
+        graph_module = copy.deepcopy(graph_module)
+
+    modules2optimize = create_execution_plan(graph_module)
+    pbar = tqdm(total=len(modules2optimize), desc='weight correction', initial=0, position=0, leave=True, disable=not verbose, delay=0)
+    for module in modules2optimize:
+        pbar.update(1)
+        modules = _decompose_quant_module(module)
+        fp_weight = modules[0].weight.data
+        quant_weight = modules[0].weight_fake_quant(fp_weight)
+
+        module.weight.data = weight_correction_helper(
+            fp_weight, 
+            quant_weight, 
+            transpose=isinstance(modules[0], TRANSPOSED_LAYERS)
+        )
 
     return graph_module

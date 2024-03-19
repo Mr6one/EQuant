@@ -195,6 +195,8 @@ class MSEPerChannelObserver(PerChannelMinMaxObserver):
 
     def __init__(
         self,
+        n_steps=100,
+        scale_range_ratio = [0.01, 1],
         ch_axis=0,
         dtype=torch.quint8,
         qscheme=torch.per_channel_affine,
@@ -218,6 +220,8 @@ class MSEPerChannelObserver(PerChannelMinMaxObserver):
             is_dynamic=is_dynamic,
             **kwargs
         )
+        self.n_steps = n_steps
+        self.scale_range_ratio = scale_range_ratio
         self.total_elements = 0
 
     @torch.jit.export

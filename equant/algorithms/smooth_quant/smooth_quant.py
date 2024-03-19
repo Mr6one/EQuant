@@ -3,9 +3,10 @@ import copy
 import torch
 import torch.fx as fx
 import torch.nn as nn
+from torch.hub import tqdm
 from torch.ao.quantization import disable_fake_quant, disable_observer
 
-from typing import Iterable, List, Dict, Union
+from typing import Iterable, List, Dict, Union, Tuple
 
 from equant.core.match.chain import _decompose_module
 from equant.core.match import find_chain_forward, quantized
@@ -78,7 +79,7 @@ def insert_identity_linear_layers(
 
 def get_quantized_nodes(
     graph_module: fx.GraphModule
-) -> List[str]:
+) -> List[fx.Node]:
     
     node: fx.Node
     quantized_nodes = []
@@ -91,6 +92,29 @@ def get_quantized_nodes(
     return quantized_nodes
 
 
+def create_execution_plan(
+    graph_module: fx.GraphModule,
+    quantized_nodes: List[fx.Node]
+) -> List[Tuple[fx.Node, nn.Module, nn.Module]]:
+    
+    modules2optimize = []
+    for node in quantized_nodes:
+
+        chain = find_smooth_quant_chain(node, graph_module)
+
+        if chain is None:
+            continue
+        
+        linear1 = graph_module.get_submodule(chain[0].target)
+        linear2 = graph_module.get_submodule(chain[-1].target)
+
+        linear1 = _decompose_module(linear1)[0]
+        linear2 = _decompose_module(linear2)[0]
+        modules2optimize.append((node, linear1, linear2))
+
+    return modules2optimize
+
+
 @torch.no_grad()
 def smooth_quant(
     model: Union[nn.Module, fx.GraphModule],
@@ -99,7 +123,8 @@ def smooth_quant(
     absorb: bool = False,
     iters: Union[None, int] = None,
     quantile: float = 0.99999,
-    inplace: bool = False
+    inplace: bool = False,
+    verbose: bool = True
 ) -> fx.GraphModule:
     
     if not inplace:
@@ -125,21 +150,10 @@ def smooth_quant(
     observer.remove_hooks()
     del observer
 
-    node: fx.Node
-    for node in quantized_nodes:
-
-        chain = find_smooth_quant_chain(node, graph_module)
-
-        if chain is None:
-            continue
-        
-        linear1 = graph_module.get_submodule(chain[0].target)
-        linear2 = graph_module.get_submodule(chain[-1].target)
-
-        # TODO: check if linear is actually linear (may be the embedding layer for instance)
-        linear1 = _decompose_module(linear1)[0]
-        linear2 = _decompose_module(linear2)[0]
-
+    modules2optimize = create_execution_plan(graph_module, quantized_nodes)
+    pbar = tqdm(total=len(modules2optimize), desc='smooth quant', initial=0, position=0, leave=True, disable=not verbose, delay=0)
+    for node, linear1, linear2 in modules2optimize:
+        pbar.update(1)
         smooth_quant_helper(linear1, linear2, activations_max_abs[node.name], alpha=alpha)
 
     return graph_module

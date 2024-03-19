@@ -1,5 +1,5 @@
 # NOTE: subject of deprication as QTracer is only used by create_qfeature_extractor function
-# which we replaced by more stable create_feature_extractor in subgraph.py
+# which we replaced by more stable create_feature_extractor in feature_extractor.py
 
 import torch
 import torch.nn as nn

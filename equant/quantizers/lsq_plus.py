@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from torch.ao.quantization import MovingAverageMinMaxObserver
-from equant.core.quantizers.fixed_qparams import FixedQParamsFakeQuantize
+from equant.quantizers.fixed_qparams import FixedQParamsFakeQuantize
 
 
 __all__ = [
