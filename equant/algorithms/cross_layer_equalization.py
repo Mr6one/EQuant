@@ -8,7 +8,7 @@ from torch.hub import tqdm
 
 from typing import List, Union, Tuple
 
-from equant.core.match.chain import _decompose_module, find_chain_forward
+from equant.core.search.chain import _decompose_module, find_chain_forward
 
 
 __all__ = [

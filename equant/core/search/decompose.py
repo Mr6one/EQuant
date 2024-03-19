@@ -3,7 +3,7 @@ import torch.ao.nn.qat as nnqat
 
 from typing import Union
 
-from equant.core.match.module import quantized
+from equant.core.search.module import quantized
 
 
 __all__ = [

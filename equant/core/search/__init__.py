@@ -1,3 +1,3 @@
-from equant.core.match.chain import *
-from equant.core.match.decompose import *
-from equant.core.match.module import *
+from equant.core.search.chain import *
+from equant.core.search.decompose import *
+from equant.core.search.module import *

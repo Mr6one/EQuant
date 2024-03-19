@@ -9,8 +9,8 @@ from torch.ao.quantization import disable_observer, disable_fake_quant, enable_f
 import warnings
 from typing import Any, Iterable, List, Tuple
 
-from equant.core.match.decompose import _decompose_module, _decompose_quant_module
-from equant.core.match import has_bn, quantized
+from equant.core.search.decompose import _decompose_module, _decompose_quant_module
+from equant.core.search import has_bn, quantized
 from equant.core.subgraph import create_subgraph
 from equant.core.feature_extractor import collect_inputs_outputs_for_subgraph, model_forward
 from equant.fuse.utils import replace_node_module

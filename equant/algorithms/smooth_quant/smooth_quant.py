@@ -8,8 +8,8 @@ from torch.ao.quantization import disable_fake_quant, disable_observer
 
 from typing import Iterable, List, Dict, Union, Tuple
 
-from equant.core.match.chain import _decompose_module
-from equant.core.match import find_chain_forward, quantized
+from equant.core.search.chain import _decompose_module
+from equant.core.search import find_chain_forward, quantized
 from equant.algorithms.smooth_quant.common import create_identity_layer_from_linear, \
     insert_module, add_observers, calibrate, smooth_quant_helper, LINEAR_LAYERS, ACTIVATIONS
 

@@ -7,8 +7,8 @@ from torch.hub import tqdm
 
 from typing import List
 
-from equant.core.match import has_bn, quantized
-from equant.core.match.decompose import _decompose_module, _decompose_quant_module
+from equant.core.search import has_bn, quantized
+from equant.core.search.decompose import _decompose_module, _decompose_quant_module
 
 
 __all__ = [

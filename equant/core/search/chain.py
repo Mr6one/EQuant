@@ -4,7 +4,7 @@ import torch.fx as fx
 from types import FunctionType
 from typing import List, Tuple, Union
 
-from equant.core.match.decompose import _decompose_module
+from equant.core.search.decompose import _decompose_module
 
 
 __all__ = [

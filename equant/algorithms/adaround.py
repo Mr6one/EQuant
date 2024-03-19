@@ -13,8 +13,8 @@ from torch.ao.quantization import disable_observer, disable_fake_quant, enable_f
 import warnings
 from typing import Any, Iterable, List, Tuple, Union
 
-from equant.core.match.chain import _decompose_module
-from equant.core.match import has_bn, quantized
+from equant.core.search.chain import _decompose_module
+from equant.core.search import has_bn, quantized
 from equant.core.subgraph import create_subgraph
 from equant.core.feature_extractor import collect_inputs_outputs_for_subgraph, model_forward
 from equant.core.interpreter import DataInterpreter
