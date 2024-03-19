@@ -32,7 +32,7 @@ qconfig = [
             },
             'quantizer': 'lsq'
         },
-        'layers': ['*'], # quantize all layers
+        'layers': ['*'] # quantize all layers
     }
 ]
 
