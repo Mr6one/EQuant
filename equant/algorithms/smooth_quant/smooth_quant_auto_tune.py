@@ -11,8 +11,8 @@ from torch.ao.quantization.fake_quantize import FakeQuantize, disable_observer, 
 
 from typing import Iterable, List, Dict, Union
 
-from equant.core.match import find_chain_forward, find_chain_backward, quantized
-from equant.core.match.chain import _decompose_module
+from equant.core.search import find_chain_forward, find_chain_backward, quantized
+from equant.core.search.chain import _decompose_module
 from equant.observers.utils import reset_observer
 from equant.core.subgraph import create_subgraph
 from equant.core.feature_extractor import collect_inputs_outputs_for_subgraph, model_forward
