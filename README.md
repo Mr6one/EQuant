@@ -1,6 +1,6 @@
 # EQuant
 
-<p align="center"><img src="pytorch fx 2.JPG" width="900" ></p>
+<p align="center"><img src="./assets/logo.jpg" width="900" ></p>
 
 EQuant provides a collection of algorithms to improve post-training quantization (PTQ) accuracy and extends PyTorch observers and quantizers with new ones. It also implements basic fusion methods and extends PyTorch backend with new fusion recipes. All quantized models support quantization-aware training (QAT) mode.
 
