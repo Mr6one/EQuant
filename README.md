@@ -60,7 +60,7 @@ qconfig = [
     {
         'weight': {
             # quantization recipe for weights
-        }
+        },
         'activation': {
             # quantization recipe for activations
         },
@@ -70,7 +70,7 @@ qconfig = [
     {
         'weight': {
             # another quantization recipe for weights
-        }
+        },
         'activation': {
             # another quantization recipe for activations
         },
