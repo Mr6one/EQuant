@@ -66,7 +66,7 @@ qconfig = [
         'activation': {
             # quantization recipe for activations
         },
-        'layers': [...], # list of layers for this scheme
+        'layers': [...] # list of layers for this scheme
     },
     # scheme 2
     {
@@ -76,7 +76,7 @@ qconfig = [
         'activation': {
             # another quantization recipe for activations
         },
-        'layers': [...], # list of layers for this scheme
+        'layers': [...] # list of layers for this scheme
     }
     # scheme 3
     ...
