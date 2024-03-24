@@ -74,13 +74,13 @@ def compute_bias(
     fp_module = fp_graph_module.get_submodule(fp_node.target)
     fp_modules = _decompose_module(fp_module)
     fp_subgraph = create_subgraph(fp_graph_module, [fp_node.name])
-    fp_inputs = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph, dataloader)
+    fp_inputs, _ = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph, dataloader)
     _, fp_outputs = collect_decomposed_module_inputs_outputs(fp_modules, fp_inputs, device, start=0, end=1)
     
     quant_module = graph_module.get_submodule(quant_node.target)
     quant_modules = _decompose_quant_module(quant_module)
     quant_subgraph = create_subgraph(graph_module, [quant_node.name])
-    quant_inputs = collect_inputs_outputs_for_subgraph(graph_module, quant_subgraph, dataloader)
+    quant_inputs, _ = collect_inputs_outputs_for_subgraph(graph_module, quant_subgraph, dataloader)
     _, quant_outputs = collect_decomposed_module_inputs_outputs(quant_modules, quant_inputs, device, start=0, end=1)
 
     if isinstance(_decompose_module(quant_module)[0], nn.Linear):

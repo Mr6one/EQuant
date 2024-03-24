@@ -171,8 +171,8 @@ class QuantilePerChannelObserver(PerChannelMinMaxObserver):
     @torch.jit.export
     def reset_min_max_vals(self):
         """Resets the min/max values."""
-        self.min_val.copy_(torch.tensor([]))
-        self.max_val.copy_(torch.tensor([]))
+        self.min_val = torch.rand(0,)
+        self.max_val = torch.rand(0,)
         self.total_elements = 0
 
     def forward(self, x_orig):

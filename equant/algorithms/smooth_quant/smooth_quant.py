@@ -9,11 +9,11 @@ from torch.ao.quantization import disable_fake_quant, disable_observer
 from typing import Iterable, List, Dict, Union, Tuple
 
 from equant.core.search.chain import _decompose_module
-from equant.core.search import find_chain_forward, quantized
-from equant.algorithms.smooth_quant.common import create_identity_layer_from_linear, \
-    insert_module, add_observers, calibrate, smooth_quant_helper, LINEAR_LAYERS, ACTIVATIONS
-
+from equant.core.search import quantized
 from equant.algorithms.smooth_quant.utils import save_quantization_state
+from equant.algorithms.smooth_quant.common import create_identity_layer_from_linear, \
+    insert_module, add_observers, calibrate, smooth_quant_helper, LINEAR_LAYERS, \
+    find_smooth_quant_chain_with_quantizers_forward
 
 
 __all__ = [
@@ -39,24 +39,6 @@ def insert_identity_linear_layer(
     node.args = (linear1_node,)
 
 
-def find_smooth_quant_chain(
-    node: fx.Node,
-    graph_module: fx.GraphModule
-) -> List[fx.Node]:
-
-    chain = find_chain_forward(node, graph_module, patterns=[LINEAR_LAYERS, ACTIVATIONS, LINEAR_LAYERS])
-
-    if chain is not None:
-        return chain
-
-    chain = find_chain_forward(node, graph_module, patterns=[LINEAR_LAYERS, LINEAR_LAYERS])
-
-    if chain is not None:
-        return chain
-
-    return None
-
-
 def insert_identity_linear_layers(
     quantized_nodes: List[fx.Node],
     graph_module: fx.GraphModule
@@ -68,7 +50,8 @@ def insert_identity_linear_layers(
         if node.op == 'call_module':
             module = graph_module.get_submodule(node.target)
             module = _decompose_module(module)[0]
-            if isinstance(module, LINEAR_LAYERS) and find_smooth_quant_chain(node, graph_module) is None:
+            if isinstance(module, LINEAR_LAYERS) and \
+                find_smooth_quant_chain_with_quantizers_forward(node, graph_module) is None:
                 insert_identity_linear_layer(node, graph_module, named_modules)
 
     graph_module.graph.lint()
@@ -100,7 +83,7 @@ def create_execution_plan(
     modules2optimize = []
     for node in quantized_nodes:
 
-        chain = find_smooth_quant_chain(node, graph_module)
+        chain = find_smooth_quant_chain_with_quantizers_forward(node, graph_module)
 
         if chain is None:
             continue
@@ -110,7 +93,7 @@ def create_execution_plan(
 
         linear1 = _decompose_module(linear1)[0]
         linear2 = _decompose_module(linear2)[0]
-        modules2optimize.append((node, linear1, linear2))
+        modules2optimize.append((chain[-1], linear1, linear2))
 
     return modules2optimize
 
@@ -120,7 +103,7 @@ def smooth_quant(
     model: Union[nn.Module, fx.GraphModule],
     dataloader: Iterable,
     alpha: float = 0.5,
-    absorb: bool = False,
+    absorb: bool = True,
     iters: Union[None, int] = None,
     quantile: float = 0.99999,
     inplace: bool = False,

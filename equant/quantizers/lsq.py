@@ -37,13 +37,13 @@ class FakeQuantizeLSQ(FixedQParamsFakeQuantize):
             if self.is_per_channel:
                 X = torch._fake_quantize_learnable_per_channel_affine(
                     X, self.scale, self.zero_point,
-                    self.ch_axis, self.activation_post_process.quant_min, 
-                    self.activation_post_process.quant_max, self.grad_factor
+                    self.ch_axis, round(self.activation_post_process.quant_min), 
+                    round(self.activation_post_process.quant_max), self.grad_factor
                 )
             else:
                 X = torch._fake_quantize_learnable_per_tensor_affine(
                     X, self.scale, self.zero_point,
-                    self.activation_post_process.quant_min, 
-                    self.activation_post_process.quant_max, self.grad_factor
+                    round(self.activation_post_process.quant_min),
+                    round(self.activation_post_process.quant_max), self.grad_factor
                 )
         return X

@@ -7,25 +7,24 @@ import torch.nn as nn
 from torch import Tensor
 from torch.hub import tqdm
 import torch.nn.functional as F
-from torch.ao.quantization.fake_quantize import FakeQuantize, disable_observer, disable_fake_quant, enable_fake_quant, enable_observer
+from torch.ao.quantization.fake_quantize import disable_observer, disable_fake_quant, enable_fake_quant, enable_observer
 
 from typing import Iterable, List, Dict, Union
 
-from equant.core.search import find_chain_forward, find_chain_backward, quantized
+from equant.core.search import find_chain_backward, quantized
 from equant.core.search.chain import _decompose_module
 from equant.observers.utils import reset_observer
 from equant.core.subgraph import create_subgraph
 from equant.core.feature_extractor import collect_inputs_outputs_for_subgraph, model_forward
 from equant.core.interpreter import DataInterpreter
 from equant.algorithms.smooth_quant.common import create_identity_layer_from_linear, \
-    insert_module, add_observers, calibrate, smooth_quant_helper, LINEAR_LAYERS, ACTIVATIONS
+    insert_module, add_observers, calibrate, smooth_quant_helper, LINEAR_LAYERS, ACTIVATIONS, \
+    QUANTIZERS, find_smooth_quant_chain_with_quantizers_forward
 
 
 __all__ = [
     'smooth_quant_auto_tune'
 ]
-
-QUANTIZERS = (FakeQuantize,)
 
 
 def insert_identity_quant_linear_layer(
@@ -78,24 +77,6 @@ def find_smooth_quant_chain_with_quantizers_backward(
     return None
 
 
-def find_smooth_quant_chain_with_quantizers_forward(
-    node: fx.Node,
-    graph_module: fx.GraphModule
-) -> List[fx.Node]:
-
-    chain = find_chain_forward(node, graph_module, patterns=[LINEAR_LAYERS, ACTIVATIONS, QUANTIZERS, LINEAR_LAYERS])
-
-    if chain is not None:
-        return chain
-
-    chain = find_chain_forward(node, graph_module, patterns=[LINEAR_LAYERS, QUANTIZERS, LINEAR_LAYERS])
-
-    if chain is not None:
-        return chain
-    
-    return None
-
-
 def insert_identity_quant_linear_layers(
     graph_module: fx.GraphModule
 ) -> fx.GraphModule:
@@ -134,7 +115,7 @@ def find_optimal_alpha(
     device: torch.device
 ) -> float:
     
-    quant_subgraph_module.apply(disable_observer).apply(enable_fake_quant)
+    quant_subgraph_module.apply(enable_observer).apply(disable_fake_quant)
 
     min_loss = float('inf')
     optimal_aplha = (min_alpha + max_alpha) / 2
@@ -146,7 +127,7 @@ def find_optimal_alpha(
         alphas = np.append(alphas, 0.5)
 
     for alpha in alphas:
-        quant_subgraph_module_tmp = copy.deepcopy(quant_subgraph_module).to(device)
+        quant_subgraph_module_tmp = copy.deepcopy(quant_subgraph_module)
 
         linear1 = quant_subgraph_module_tmp.get_submodule(chain[0].target)
         linear2 = quant_subgraph_module_tmp.get_submodule(chain[-1].target)
@@ -156,7 +137,7 @@ def find_optimal_alpha(
 
         smooth_quant_helper(linear1, linear2, scale, alpha=alpha)
 
-        quant_subgraph_module_tmp.apply(reset_observer).apply(disable_fake_quant)
+        quant_subgraph_module_tmp.apply(reset_observer).to(device)
         calibrate(quant_subgraph_module_tmp, quant_inputs, iters)
         quant_subgraph_module_tmp.apply(disable_observer).apply(enable_fake_quant)
         
@@ -262,8 +243,6 @@ def smooth_quant_auto_tune(
 
         smooth_quant_helper(linear1, linear2, activations_max_abs[chain[-1].name], alpha=optimal_aplha)
 
-    graph_module.apply(disable_observer)
-
     return graph_module
 
 
@@ -274,7 +253,7 @@ def fast_smooth_quant_auto_tune(
     min_alpha: float = 0.3,
     max_alpha: float = 0.7,
     steps: int = 10,
-    absorb: bool = False,
+    absorb: bool = True,
     iters: Union[None, int] = None,
     quantile: float = 0.99999,
     cache_data: bool = False,

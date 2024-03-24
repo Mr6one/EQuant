@@ -45,18 +45,30 @@ class AdaRoundFakeQuant(nn.Module):
 
         super().__init__()
 
-        self.scale = scale.clip(1e-10).detach()
+        self.scale = self._expand_qparams(
+            weight, scale.clip(1e-10).detach()
+        )
         self.quant_min = int(quant_min)
         self.quant_max = int(quant_max)
 
         max_zero_point = int(quant_max - quant_min)
-        self.zero_point = zero_point.round().clip(0, max_zero_point)
+        self.zero_point = self._expand_qparams(
+            weight, zero_point.round().clip(0, max_zero_point)
+        )
 
         self.gamma = gamma
         self.zeta = zeta
 
         hidden = self._init_v(weight, self.scale, gamma, zeta)
         self.hidden = nn.Parameter(hidden)
+
+    @staticmethod
+    def _expand_qparams(weight: Tensor, qparam: Tensor):
+        if qparam.dim() == 1:
+            for _ in range(weight.dim() - 1):
+                qparam = qparam.unsqueeze(1)
+
+        return qparam
 
     @staticmethod
     def _init_v(weight: Tensor, scale: Tensor, gamma: float, zeta: float) -> Tensor:
@@ -199,6 +211,7 @@ def optimize_module(
     warm_start: float, 
     beta_range: Tuple, 
     reg_param: float,
+    verbose_frequency: int,
     device: torch.device
 ) -> None:
 
@@ -241,11 +254,11 @@ def optimize_module(
             total_loss['reconstruction_loss'] += reconstruction_loss.item()
             total_loss['round_loss'] += round_loss.item()
 
-            if (curr_iter + 1) % 100 == 0:
+            if (curr_iter + 1) % verbose_frequency == 0:
                 
-                avg_total_loss = total_loss['loss'] / 100
-                avg_reconstruction_loss = total_loss['reconstruction_loss'] / 100
-                avg_round_loss = total_loss['round_loss'] / 100
+                avg_total_loss = total_loss['loss'] / verbose_frequency
+                avg_reconstruction_loss = total_loss['reconstruction_loss'] / verbose_frequency
+                avg_round_loss = total_loss['round_loss'] / verbose_frequency
                 
                 print(f'num_iter: {curr_iter + 1}/{num_iters}, avg_total_loss: {avg_total_loss}, avg_reconstruction_loss: {avg_reconstruction_loss}, avg_round_loss: {avg_round_loss}')
                 
@@ -297,7 +310,8 @@ def adaround(
     beta_range: Tuple = (20, 2), 
     reg_param: float = 0.01,
     inplace: bool = False,
-    verbose: bool = True
+    verbose: bool = True,
+    verbose_frequency : int = 1000
 ) -> fx.GraphModule:
     
     if not inplace:
@@ -309,17 +323,17 @@ def adaround(
 
     nodes2optimize = create_execution_plan(graph_module, fp_graph_module)
     pbar = tqdm(total=len(nodes2optimize), desc='adaround', initial=0, position=0, leave=True, disable=not verbose, delay=0)
-    for fp_node, node in nodes2optimize:
+    for fp_node, quant_node in nodes2optimize:
         pbar.update(1)
-        subgraph = create_subgraph(graph_module, [node.name, next(iter(node.users)).name])
+        subgraph = create_subgraph(graph_module, [quant_node.name, next(iter(quant_node.users)).name])
         quant_inputs, _ = collect_inputs_outputs_for_subgraph(graph_module, subgraph, dataloader)
 
         fp_subgraph = create_subgraph(fp_graph_module, [fp_node.name, next(iter(fp_node.users)).name])
         _, fp_outputs = collect_inputs_outputs_for_subgraph(fp_graph_module, fp_subgraph, dataloader)
         
-        module = graph_module.get_submodule(node.target)
-        print(f'Optimizing {node.target}')
-        optimize_module(module, quant_inputs, fp_outputs, num_iters, lr, warm_start, beta_range, reg_param, device=device)
+        module = graph_module.get_submodule(quant_node.target)
+        print(f'Optimizing {quant_node.target}')
+        optimize_module(module, quant_inputs, fp_outputs, num_iters, lr, warm_start, beta_range, reg_param, verbose_frequency, device=device)
         print('-' * 50)
 
     return graph_module
@@ -335,6 +349,7 @@ def fast_adaround(
     beta_range: Tuple = (20, 2), 
     reg_param: float = 0.01,
     inplace: bool = False,
+    verbose_frequency: int = 1000,
     cache_data: bool = False
 ) -> fx.GraphModule:
     
@@ -388,7 +403,7 @@ def fast_adaround(
 
                 print(f'Optimizing {node.target}')
                 module.apply(disable_observer)
-                optimize_module(module, quant_inputs, fp_outputs, num_iters, lr, warm_start, beta_range, reg_param, device=device)
+                optimize_module(module, quant_inputs, fp_outputs, num_iters, lr, warm_start, beta_range, reg_param, verbose_frequency, device=device)
                 print('-' * 50)
 
         with torch.no_grad():

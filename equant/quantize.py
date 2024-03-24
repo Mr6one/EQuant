@@ -45,6 +45,7 @@ def convert(
     if backend_config is None:
         backend_config = get_backend_config()
 
+    graph_module.cpu()
     qmodel = convert_fx(graph_module, convert_custom_config, _remove_qconfig, qconfig_mapping, backend_config=backend_config)
 
     return qmodel

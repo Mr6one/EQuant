@@ -3,9 +3,11 @@ import torch.fx as fx
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.ao.quantization.fake_quantize import FakeQuantize
 
 from typing import Iterable, List, Dict, Tuple, Union
 from equant.core.feature_extractor import model_forward
+from equant.core.search import find_chain_forward, quantized
 
 
 LINEAR_LAYERS = (
@@ -14,6 +16,8 @@ LINEAR_LAYERS = (
 )
 
 ACTIVATIONS = (nn.ReLU, F.relu)
+
+QUANTIZERS = (FakeQuantize,)
 
 
 def create_identity_layer_from_linear(
@@ -30,6 +34,7 @@ def create_identity_layer_from_linear(
         linear = class_obj(module.in_channels, module.in_channels, kernel_size=1, groups=module.groups, bias=False)
         nn.init.dirac_(linear.weight, groups=module.groups)
 
+    linear = linear.to(module.weight.device)
     return linear
 
 
@@ -45,12 +50,10 @@ class QuantileObserver:
         self.quantile = quantile
 
     def _forward_hook(self, module: nn.Module, input: Tuple[Tensor], _) -> None:
-        input: Tensor = input[0].detach()
-        dim = list(range(input.dim()))
-        del dim[1]
+        input: Tensor = input[0].detach().transpose(0, 1).flatten(start_dim=1)
 
-        min_val = input.quantile(1 - self.quantile, dim=dim)
-        max_val = input.quantile(self.quantile, dim=dim)
+        min_val = input.quantile(1 - self.quantile, dim=1)
+        max_val = input.quantile(self.quantile, dim=1)
 
         node_name = self.module_to_node_name[module]
 
@@ -69,8 +72,8 @@ class QuantileObserver:
         max_abs = {}
 
         for node_name in self.min_vals:
-            min_val = torch.stack(self.min_vals[node_name]).min(dim=0)
-            max_val = torch.stack(self.max_vals[node_name]).max(dim=0)
+            min_val = torch.stack(self.min_vals[node_name]).min(dim=0).values
+            max_val = torch.stack(self.max_vals[node_name]).max(dim=0).values
             max_abs[node_name] = torch.maximum(max_val.abs(), min_val.abs())
 
         return max_abs
@@ -214,3 +217,21 @@ def smooth_quant_helper(
 
     linear1.weight.data = scale_weight(linear1, scale, out_channel=True)
     linear2.weight.data = scale_weight(linear2, scale, out_channel=False)
+
+
+def find_smooth_quant_chain_with_quantizers_forward(
+    node: fx.Node,
+    graph_module: fx.GraphModule
+) -> List[fx.Node]:
+
+    chain = find_chain_forward(node, graph_module, patterns=[LINEAR_LAYERS, ACTIVATIONS, QUANTIZERS, LINEAR_LAYERS])
+
+    if chain is not None and quantized(graph_module.get_submodule(chain[-1].target)):
+        return chain
+
+    chain = find_chain_forward(node, graph_module, patterns=[LINEAR_LAYERS, QUANTIZERS, LINEAR_LAYERS])
+
+    if chain is not None and quantized(graph_module.get_submodule(chain[-1].target)):
+        return chain
+    
+    return None

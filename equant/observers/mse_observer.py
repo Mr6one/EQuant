@@ -19,13 +19,13 @@ def quantization_loss(x, scale, zero_point, quant_min, quant_max, ch_axis=-1):
             new_axis_list = [i for i in range(len(x_dim))]
             new_axis_list[ch_axis] = 0
             new_axis_list[0] = ch_axis
-            loss = loss.permute(new_axis_list)
+            loss = loss.permute(new_axis_list).flatten(start_dim=1)
             return loss.mean(1)
-
+    
     if ch_axis != -1:
-        x_q = torch.fake_quantize_per_channel_affine(x, scale, zero_point, ch_axis, quant_min, quant_max)
+        x_q = torch.fake_quantize_per_channel_affine(x, scale, zero_point, ch_axis, round(quant_min), round(quant_max))
     else:
-        x_q = torch.fake_quantize_per_tensor_affine(x, scale, zero_point, quant_min, quant_max)
+        x_q = torch.fake_quantize_per_tensor_affine(x, scale, zero_point, round(quant_min), round(quant_max))
 
     loss = mse_loss(x_q, x, ch_axis)
     return loss
@@ -116,15 +116,16 @@ class MSEObserver(MinMaxObserver):
         return best_scale, best_zero_point
 
     def tune_scale_offset(self, x, scale, zero_point):
-        min_loss = float('inf')
+        device = x.device
+        min_loss = torch.tensor(float('inf'), device=device)
         best_scale = scale.clone()
         best_zero_point = zero_point.clone()
         alpha, beta = self.scale_range_ratio
         for i in range(self.n_steps):
             s = alpha * scale + (beta - alpha) * scale * (i + 1) / self.n_steps
-            s = torch.max(s, self.eps)
-            for zp in range(self.quant_min, self.quant_max + 1):
-                zp.resize_(s.shape)
+            s = torch.max(s, self.eps).to(device)
+            for zp in range(round(self.quant_min), round(self.quant_max) + 1):
+                zp = torch.empty_like(s, dtype=torch.int32).fill_(zp)
                 loss = quantization_loss(x, s, zp, self.quant_min, self.quant_max)
                 best_scale = torch.where(loss < min_loss, s, best_scale)
                 best_zero_point = torch.where(loss < min_loss, zp, best_zero_point)
@@ -161,8 +162,8 @@ class MSEObserver(MinMaxObserver):
             min_val = alpha * self.min_val + beta * min_val
             max_val = alpha * self.max_val + beta * max_val
 
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
+        self.min_val.copy_(min_val.reshape(self.min_val.shape))
+        self.max_val.copy_(max_val.reshape(self.max_val.shape))
         self.total_elements += 1
 
         return x_orig
@@ -227,8 +228,8 @@ class MSEPerChannelObserver(PerChannelMinMaxObserver):
     @torch.jit.export
     def reset_min_max_vals(self):
         """Resets the min/max values."""
-        self.min_val.copy_(torch.tensor([]))
-        self.max_val.copy_(torch.tensor([]))
+        self.min_val = torch.rand(0,)
+        self.max_val = torch.rand(0,)
         self.total_elements = 0
 
     def tune_scale(self, x, scale):
@@ -247,22 +248,22 @@ class MSEPerChannelObserver(PerChannelMinMaxObserver):
             s = alpha * scale + (beta - alpha) * scale * (i + 1) / self.n_steps
             s = torch.max(s, self.eps)
             loss = quantization_loss(x, s, best_zero_point, self.quant_min, self.quant_max, self.ch_axis)
-            min_loss = loss.item()
             best_scale = torch.where(loss < min_loss, s, best_scale)
             min_loss = torch.min(min_loss, loss)
 
         return best_scale, best_zero_point
 
     def tune_scale_offset(self, x, scale, zero_point):
-        min_loss = float('inf')
+        device = x.device
+        min_loss = torch.tensor(float('inf'), device=device)
         best_scale = scale.clone()
         best_zero_point = zero_point.clone()
         alpha, beta = self.scale_range_ratio
         for i in range(self.n_steps):
             s = alpha * scale + (beta - alpha) * scale * (i + 1) / self.n_steps
-            s = torch.max(s, self.eps)
-            for zp in range(self.quant_min, self.quant_max + 1):
-                zp.resize_(s.shape)
+            torch.max(s, self.eps).to(device)
+            for zp in range(round(self.quant_min), round(self.quant_max) + 1):
+                zp = torch.empty_like(s, dtype=torch.int32).fill_(zp)
                 loss = quantization_loss(x, s, zp, self.quant_min, self.quant_max, self.ch_axis)
                 best_scale = torch.where(loss < min_loss, s, best_scale)
                 best_zero_point = torch.where(loss < min_loss, zp, best_zero_point)

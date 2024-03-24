@@ -93,13 +93,14 @@ def cross_layer_equalization_helper(
     linear1: Union[nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, 
         nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d], 
     linear2: Union[nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, 
-        nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d]
+        nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d],
+    eps=1e-8
 ) -> None:
     
     r1 = get_range(linear1, out_channel=True)
     r2 = get_range(linear2, out_channel=False)
 
-    scale = (r1 / r2).sqrt()
+    scale = (r1 / r2.clip(min=eps)).sqrt()
 
     if linear1.bias is not None:
         linear1.bias.data /= scale
