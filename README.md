@@ -48,7 +48,7 @@ qmodel = quantize(model, qconfig_mapping, example_inputs)
 for data in dataloader:
     _ = qmodel(data)
 
-# convert the fake-quantized model to a quantized model
+# convert a fake-quantized model to the quantized model
 model_int = convert(qmodel)
 ```
 
